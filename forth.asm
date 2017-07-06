@@ -167,18 +167,32 @@
         USE_CALLDOLIT    = 0    ; use CALL DOLIT instead of the DOLIT TRAP handler (deprecated)
         CASEINSENSITIVE  = 0    ; Case insensitive dictionary search
         SPEEDOVERSIZE    = 0    ; Speed-over-size in core words ROT - = < -1 0 1
-        BAREBONES        = 0    ; Remove or unlink some more: hi HERE .R U.R SPACES @EXECUTE AHEAD CALL, EXIT COMPILE [COMPILE] DEPTH
+        BAREBONES        = 0    ; Removes words: '?KEY 'EMIT EXIT EXG @EXECUTE ERASE
+                                ;   Drops headers: ?RX TX! ?RXP ?RX TXP! TX! LAST DEPTH COUNT
+                                ;     SPACES .R NAME> ABORT" AHEAD
+                                ; Drops support for entry of binary (%) and decimal (&)
+        BOOTSTRAP        = 0    ; Remove words: (+loop) EXIT 2! 2/ UM+ OR = MAX MIN U. . ? .(
+                                ;  [COMPILE] FOR DO BEGIN WHILE ABORT" ." _TYPE dm+ DUMP .S
+                                ;  .ID >CHAR <
+        UNLINKCORE       = 0    ; Drops headers on everything except: (TODO)
+                                ;  ABORT" AFT AGAIN AHEAD BEGIN DO DUMP ELSE EXG FOR IF LEAVE
+                                ;  LOOP MAX MIN NEXT OR REPEAT SEE SPACES THEN U. U.R UM+
+                                ;  UNTIL WHILE WORDS [COMPILE] _TYPE dm+
         NO_VARIABLE      = 0    ; Disable VARIABLE and feature "VARIABLE in Flash allocates RAM"
 
-        WORDS_LINKINTER  = 0    ; Link interpreter words: ACCEPT QUERY TAP kTAP hi 'BOOT tmp >IN 'TIB #TIB eval CONTEXT pars PARSE NUMBER? DIGIT? WORD TOKEN NAME> SAME? find ABORT aborq $INTERPRET INTER? .OK ?STACK EVAL PRESET QUIT $COMPILE
-        WORDS_LINKCOMP   = 0    ; Link compiler words: cp last OVERT $"| ."| $,n
+        WORDS_LINKINTER  = 0    ; Link interpreter words: $" aborq ABORT ACCEPT 'BOOT CONTEXT
+                                ;    CUPPER DIGIT? eval 'eval EXTRACT find ^h hi >IN $INTERPRET
+                                ;    kTAP NAME? NUMBER? .OK PAD pars PRESET 'PROMPT QUERY QUIT
+                                ;    SAME? ?STACK TAP TIB 'TIB #TIB TOKEN WORD
+        WORDS_LINKCOMP   = 0    ; Link compiler words: cp last OVERT $,n ?UNIQUE $COMPILE
         WORDS_LINKRUNTI  = 0    ; Link runtime words: doLit do$ doVAR donxt dodoes ?branch branch
+                                ;    (+loop) $"| ."|
         WORDS_LINKCHAR   = 0    ; Link char out words: DIGIT <# # #S SIGN #> str hld HOLD PACK$
-        WORDS_LINKMISC   = 0    ; Link composing words of SEE DUMP WORDS: >CHAR _TYPE dm+ .ID >NAME
+        WORDS_LINKMISC   = 0    ; Link composing words of: >CHAR _TYPE dm+ .ID >NAME
 
         WORDS_EXTRASTACK = 0    ; Link/include stack core words: rp@ rp! sp! sp@
-        WORDS_EXTRADEBUG = 0    ; Extra debug words: SEE
-        WORDS_EXTRACORE  = 0    ; Extra core words: =0 I
+        WORDS_EXTRADEBUG = 0    ; Extra debug words: >NAME
+        WORDS_EXTRACORE  = 0    ; Extra core words: 0= I
         WORDS_EXTRAMEM   = 0    ; Extra memory words: B! 2C@ 2C!
         WORDS_EXTRAEEPR  = 0    ; Extra EEPROM lock/unlock words: LOCK ULOCK ULOCKF LOCKF
         WORDS_HWREG      = 0    ; Peripheral Register words
@@ -338,7 +352,7 @@ _TRAP_Handler:
 
         .macro DoLitW w
         call    DOLIT
-        .db     w
+        .dw     w
         .endm
 
         .endif
@@ -567,12 +581,14 @@ COLD:
 ;       'BOOT   ( -- a )
 ;       The application startup vector and NVM USR setting array
 
+        .ifeq   UNLINKCORE
         .ifne   (WORDS_LINKINTER + HAS_CPNVM)
         .dw     LINK
 
         LINK =  .
         .db     5
         .ascii  "'BOOT"
+        .endif
         .endif
 TBOOT:
         CALL    DOVAR
@@ -838,20 +854,24 @@ TIM4_END:
 
 ;       ?KEY    ( -- c T | F )  ( TOS STM8: -- Y,Z,N )
 ;       Return input char and true, or false.
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     4
         .ascii  "?KEY"
+        .endif
 QKEY:
         JP      [USRQKEY]
 
 ;       EMIT    ( c -- )
 ;       Send character c to output device.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     4
         .ascii  "EMIT"
+        .endif
 EMIT:
         JP      [USREMIT]
 
@@ -890,11 +910,13 @@ DOLITC:
 ;       doLit   ( -- w )
 ;       Push an inline literal.
 
+        .ifeq   UNLINKCORE
         .ifne   WORDS_LINKRUNTI
         .dw     LINK
         LINK =  .
         .db     (COMPO+5)
         .ascii  "doLit"
+        .endif
         .endif
 DOLIT:
         DECW    X               ;SUBW   X,#2
@@ -906,15 +928,18 @@ DOLIT:
         JRA     POPYJPY
         .endif
 
+        .ifeq   BOOTSTRAP
         .ifne   HAS_DOLOOP
         ;       (+loop) ( +n -- )
         ;       Add n to index R@ and test for lower than limit (R-CELL)@.
 
         .ifne   WORDS_LINKRUNTI
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     (COMPO+7)
         .ascii  "(+loop)"
+        .endif
         .endif
 DOPLOOP:
         LDW     Y,(5,SP)
@@ -940,25 +965,30 @@ DOPLOOP:
 ;       LEAVE   ( -- )
 ;       Leave a DO .. LOOP/+LOOP loop.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (COMPO+5)
         .ascii  "LEAVE"
+        .endif
 LEAVE:
         ADDW    SP,#6
         POPW    Y               ; DO leaves the address of +loop on the R-stack
         JP      (2,Y)
         .endif
+        .endif
 
 ;       next    ( -- )
 ;       Code for single index loop.
 
+        .ifeq   UNLINKCORE
         .ifne   WORDS_LINKRUNTI
         .dw     LINK
         LINK =  .
         .db     (COMPO+5)
         .ascii  "donxt"
+        .endif
         .endif
 DONXT:
         LDW     Y,(3,SP)
@@ -980,11 +1010,13 @@ QDQBRAN:
 ;       ?branch ( f -- )
 ;       Branch if flag is zero.
 
+        .ifeq   UNLINKCORE
         .ifne   WORDS_LINKRUNTI
         .dw     LINK
         LINK =  .
         .db     (COMPO+7)
         .ascii  "?branch"
+        .endif
         .endif
 QBRAN:
         LDW     Y,X
@@ -1015,68 +1047,80 @@ YJPIND:
 ;       EXECUTE ( ca -- )
 ;       Execute word at ca.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     7
         .ascii  "EXECUTE"
+        .endif
 EXECU:
         LDW     Y,X
         INCW    X
         INCW    X
         JRA     YJPIND
 
+        .ifeq   BOOTSTRAP + BAREBONES
 ;       EXIT    ( -- )
 ;       Terminate a colon definition.
 
-        .ifeq   BAREBONES
         .dw     LINK
         LINK =  .
         .db     4
         .ascii  "EXIT"
-        .endif
 EXIT:
         POPW    Y
         RET
+        .endif
 
+        .ifeq   BOOTSTRAP
 ;       2!      ( d a -- )      ( TOS STM8: -- Y,Z,N )
 ;       Store double integer to address a.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "2!"
+        .endif
 DSTOR:
         CALL    SWAPP
         CALL    OVER
         CALLR   STORE
         CALL    CELLP
         JRA     STORE
+        .endif
 
+        .ifeq   BOOTSTRAP
 ;       2@      ( a -- d )
 ;       Fetch double integer from address a.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "2@"
+        .endif
 DAT:
         CALL    DUPP
         CALL    CELLP
         CALLR   AT
         CALL    SWAPP
         JRA     AT
+        .endif
 
 
         .ifne   WORDS_EXTRAMEM
 ;       2C!  ( n b -- )
 ;       Store word C-wise to 16 bit HW registers "MSB first"
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (3)
         .ascii  "2C!"
+        .endif
 DCSTOR:
         CALL    DDUP
         LD      A,(2,X)
@@ -1088,11 +1132,13 @@ DCSTOR:
 
 ;       2C@  ( a -- n )
 ;       Fetch word C-wise from 16 bit HW config. registers "MSB first"
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (3)
         .ascii  "2C@"
+        .endif
 DCAT:
         CALL    DOXCODE
         LDW     Y,X
@@ -1105,11 +1151,13 @@ DCAT:
 ;       B! ( t a u -- )
 ;       Set/reset bit #u (0..7) in the byte at address a to bool t
 ;       Note: creates/executes BSER/BRES + RET code on Data Stack
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (2)
         .ascii  "B!"
+        .endif
 BRSS:
         LD      A,#0x72         ; Opcode BSET/BRES
         LD      (X),A
@@ -1133,10 +1181,12 @@ BRSS:
 ;       @       ( a -- w )      ( TOS STM8: -- Y,Z,N )
 ;       Push memory location to stack.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     1
         .ascii  "@"
+        .endif
 AT:
         LDW     Y,X
         LDW     X,(X)
@@ -1147,11 +1197,12 @@ AT:
 
 ;       !       ( w a -- )      ( TOS STM8: -- Y,Z,N )
 ;       Pop data stack to memory.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     1
         .ascii  "!"
+        .endif
 STORE:
         LDW     Y,X
         LDW     X,(X)
@@ -1160,16 +1211,17 @@ STORE:
         LDW     X,(2,X)
         LDW     [YTEMP],X
         EXGW    X,Y
-        JRA     DDROP
+        JP      DDROP
 
 ;       C@      ( b -- c )      ( TOS STM8: -- A,Z,N )
 ;       Push byte in memory to stack.
 ;       STM8: Z,N
-
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     2
         .ascii  "C@"
+        .endif
 CAT:
         LDW     Y,X             ; Y=b
         LDW     Y,(Y)
@@ -1181,11 +1233,12 @@ YCAT:
 
 ;       C!      ( c b -- )
 ;       Pop     data stack to byte memory.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     2
         .ascii  "C!"
+        .endif
 CSTOR:
         LDW     Y,X
         LDW     Y,(Y)           ; Y=b
@@ -1193,6 +1246,7 @@ CSTOR:
         LD      (Y),A           ; store c at b
         JRA     DDROP
 
+        .ifeq   UNLINKCORE
         .ifne   WORDS_EXTRACORE
 ;       I       ( -- n )     ( TOS STM8: -- Y,Z,N )
 ;       Get inner FOR-NEXT or DO-LOOP index value
@@ -1204,14 +1258,16 @@ CSTOR:
 IGET:
         JRA     RAT
         .endif
+        .endif
 
 ;       R>      ( -- w )     ( TOS STM8: -- Y,Z,N )
 ;       Pop return stack to data stack.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     (COMPO+2)
         .ascii  "R>"
+        .endif
 RFROM:
         POPW    Y               ; save return addr
         LDW     YTEMP,Y
@@ -1235,10 +1291,12 @@ DOVARPTR:
 ;       Code for VARIABLE and CREATE.
 
         .ifne   WORDS_LINKRUNTI
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     (COMPO+5)
         .ascii  "doVar"
+        .endif
         .endif
 DOVAR:
         POPW    Y               ; get return addr (pfa)
@@ -1254,22 +1312,24 @@ YSTOR:
 
 ;       R@      ( -- w )        ( TOS STM8: -- Y,Z,N )
 ;       Copy top of return stack to stack (or the FOR - NEXT index value).
-
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     2
         .ascii  "R@"
+        .endif
 RAT:
         LDW     Y,(3,SP)
         JRA     YSTOR
 
 ;       >R      ( w -- )      ( TOS STM8: -- Y,Z,N )
 ;       Push data stack to return stack.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     (COMPO+2)
         .ascii  ">R"
+        .endif
 TOR:
         EXGW    X,Y
         POPW    X               ; save return addr
@@ -1285,24 +1345,25 @@ TOR:
 
 ;       NIP     ( n1 n2 -- n2 )
 ;       Drop 2nd item on the stack
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  "NIP"
-
+        .endif
 NIP:
         CALLR   SWAPP
         JRA     DROP
 
 ;       DROP    ( w -- )        ( TOS STM8: -- Y,Z,N )
 ;       Discard top stack item.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     4
         .ascii  "DROP"
+        .endif
 DROP:
         INCW    X               ; ADDW   X,#2
         INCW    X
@@ -1312,12 +1373,13 @@ DROP:
 
 ;       2DROP   ( w w -- )       ( TOS STM8: -- Y,Z,N )
 ;       Discard two items on stack.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     5
         .ascii  "2DROP"
+        .endif
 DDROP:
         INCW    X
         INCW    X
@@ -1325,11 +1387,12 @@ DDROP:
 
 ;       DUP     ( w -- w w )    ( TOS STM8: -- Y,Z,N )
 ;       Duplicate top stack item.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     3
         .ascii  "DUP"
+        .endif
 DUPP:
         LDW     Y,X
         LDW     Y,(Y)
@@ -1337,11 +1400,12 @@ DUPP:
 
 ;       SWAP ( w1 w2 -- w2 w1 ) ( TOS STM8: -- Y,Z,N )
 ;       Exchange top two stack items.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     4
         .ascii  "SWAP"
+        .endif
 SWAPP:
         LDW     Y,X
         LDW     X,(2,X)
@@ -1356,38 +1420,43 @@ SWAPP:
 
 ;       OVER    ( w1 w2 -- w1 w2 w1 ) ( TOS STM8: -- Y,Z,N )
 ;       Copy second stack item to top.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     4
         .ascii  "OVER"
+        .endif
 OVER:
         LDW     Y,X
         LDW     Y,(2,Y)
         JRA     YSTOR
 
+        .ifeq   BOOTSTRAP
 ;       UM+     ( u u -- udsum )
 ;       Add two unsigned single
 ;       and return a double sum.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     3
         .ascii  "UM+"
+        .endif
 UPLUS:
         CALLR   PLUS
         CLR     A
         RLC     A
         JP      ASTOR
+        .endif
 
 ;       +       ( w w -- sum ) ( TOS STM8: -- Y,Z,N )
 ;       Add top two items.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     1
         .ascii  "+"
+        .endif
 
 PLUS:
         LD      A,(1,X) ;D=w
@@ -1401,11 +1470,12 @@ LDADROP:
 
 ;       XOR     ( w w -- w )    ( TOS STM8: -- Y,Z,N )
 ;       Bitwise exclusive OR.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     3
         .ascii  "XOR"
+        .endif
 XORR:
         LD      A,(1,X)         ; D=w
         XOR     A,(3,X)
@@ -1416,11 +1486,12 @@ XORR:
 
 ;       AND     ( w w -- w )    ( TOS STM8: -- Y,Z,N )
 ;       Bitwise AND.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     3
         .ascii  "AND"
+        .endif
 ANDD:
         LD      A,(1,X)         ; D=w
         AND     A,(3,X)
@@ -1429,14 +1500,16 @@ ANDD:
         AND     A,(2,X)
         JRA     LDADROP
 
+        .ifeq   BOOTSTRAP
 ;       OR      ( w w -- w )    ( TOS STM8: -- immediate Y,Z,N )
 ;       Bitwise inclusive OR.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "OR"
+        .endif
 ORR:
         LD      A,(1,X)         ; D=w
         OR      A,(3,X)
@@ -1444,14 +1517,16 @@ ORR:
         LD      A,(X)
         OR      A,(2,X)
         JRA     LDADROP
+        .endif
 
 ;       0<      ( n -- t ) ( TOS STM8: -- A,Z )
 ;       Return true if n is negative.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     2
         .ascii  "0<"
+        .endif
 ZLESS:
         CLR     A
         LDW     Y,X
@@ -1464,12 +1539,13 @@ ZL1:    LD      (X),A
 
 ;       -   ( n1 n2 -- n1-n2 )  ( TOS STM8: -- Y,Z,N )
 ;       Subtraction.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     1
         .ascii  "-"
+        .endif
 
 SUBB:
         .ifne   SPEEDOVERSIZE
@@ -1493,11 +1569,13 @@ SUBB:
 ;       Start vocabulary search.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     7
         .ascii  "CONTEXT"
+        .endif
         .endif
 CNTXT:
         .ifne  HAS_CPNVM
@@ -1518,11 +1596,13 @@ CNTXT_ALIAS:
 ;       Point to top of dictionary.
 
         .ifne   WORDS_LINKCOMP
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "cp"
+        .endif
         .endif
 CPP:
         LD      A,#(RAMBASE+USRCP)
@@ -1532,11 +1612,12 @@ CPP:
 
 ;       BASE    ( -- a )     ( TOS STM8: -- Y,Z,N )
 ;       Radix base for numeric I/O.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     4
         .ascii  "BASE"
+        .endif
 BASE:
         LD      A,#(RAMBASE+USRBASE)
         JRA     ASTOR
@@ -1545,11 +1626,13 @@ BASE:
 ;       Hold parsing pointer.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  ">IN"
+        .endif
         .endif
 INN:
         LD      A,#(RAMBASE+USR_IN)
@@ -1559,11 +1642,13 @@ INN:
 ;       Count in terminal input buffer.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     4
         .ascii  "#TIB"
+        .endif
         .endif
 NTIB:
         LD      A,#(RAMBASE+USRNTIB)
@@ -1573,11 +1658,13 @@ NTIB:
 ;       Execution vector of EVAL.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     5
         .ascii  "'eval"
+        .endif
         .endif
 TEVAL:
         LD      A,#(RAMBASE+USREVAL)
@@ -1588,11 +1675,13 @@ TEVAL:
 ;       Hold a pointer of output string.
 
         .ifne   WORDS_LINKCHAR
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  "hld"
+        .endif
         .endif
 HLD:
         LD      A,#(RAMBASE+USRHLD)
@@ -1625,11 +1714,10 @@ TQKEY:
         JRA     ASTOR
         .endif
 
-
 ;       LAST    ( -- a )        ( TOS STM8: -- Y,Z,N )
 ;       Point to last name in dictionary.
 
-        .ifeq   BAREBONES
+        .ifeq   UNLINKCORE + BAREBONES
         .dw     LINK
 
         LINK =  .
@@ -1661,11 +1749,13 @@ ATOKEY:
 ;       Return address of terminal input buffer.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  "TIB"
+        .endif
 TIB:
         DoLitW  TIBB
         RET
@@ -1674,12 +1764,13 @@ TIB:
         .ifne   HAS_OUTPUTS
 ;       OUT     ( -- a )     ( TOS STM8: -- Y,Z,N )
 ;       Return address of OUTPUTS register
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  "OUT"
+        .endif
 OUTA:
         LD      A,#(OUTPUTS)
         JRA     ASTOR
@@ -1689,12 +1780,13 @@ OUTA:
 
 ;       BL      ( -- 32 )     ( TOS STM8: -- Y,Z,N )
 ;       Return 32, blank character.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "BL"
+        .endif
 BLANK:
         LD      A,#32
         JRA     ASTOR
@@ -1703,11 +1795,13 @@ BLANK:
 ;       Return 0.
 
         .ifne   SPEEDOVERSIZE
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     1
         .ascii  "0"
+        .endif
         .endif
 ZERO:
         CLR     A
@@ -1717,11 +1811,13 @@ ZERO:
 ;       Return 1.
 
         .ifne   SPEEDOVERSIZE
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     1
         .ascii  "1"
+        .endif
         .endif
 ONE:
         LD      A,#1
@@ -1731,11 +1827,13 @@ ONE:
 ;       Return -1
 
         .ifne   SPEEDOVERSIZE
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "-1"
+        .endif
         .endif
 MONE:
         LDW     Y,#0xFFFF
@@ -1745,12 +1843,13 @@ AYSTOR:
         .ifne   HAS_BACKGROUND
 ;       TIM     ( -- T)     ( TOS STM8: -- Y,Z,N )
 ;       Return TICKCNT as timer
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  "TIM"
+        .endif
 TIMM:
         LDW     Y,TICKCNT
         JRA     AYSTOR
@@ -1758,12 +1857,13 @@ TIMM:
 
 ;       BG      ( -- a)     ( TOS STM8: -- Y,Z,N )
 ;       Return address of BGADDR vector
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "BG"
+        .endif
 BGG:
         LD      A,#(BGADDR)
         JRA     ASTOR
@@ -1775,11 +1875,13 @@ BGG:
 ;       Return address of PROMPT vector
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     7
         .ascii  "'PROMPT"
+        .endif
 TPROMPT:
         LD      A,#(USRPROMPT)
         JRA     ASTOR
@@ -1794,12 +1896,13 @@ PACEE:
 
 ;       HAND    ( -- )
 ;       set PROMPT vector to interactive mode
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     4
         .ascii  "HAND"
+        .endif
 HANDD:
         LDW     Y,#(DOTOK)
 YPROMPT:
@@ -1808,7 +1911,6 @@ YPROMPT:
 
 ;       FILE    ( -- )
 ;       set PROMPT vector to file transfer mode
-
         .dw     LINK
 
         LINK =  .
@@ -1825,12 +1927,13 @@ FILEE:
 
 ;       ?DUP    ( w -- w w | 0 )   ( TOS STM8: -- Y,Z,N )
 ;       Dup tos if its not zero.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     4
         .ascii  "?DUP"
+        .endif
 QDUP:
         LDW     Y,X
         LDW     Y,(Y)
@@ -1842,12 +1945,13 @@ QDUP1:  RET
 
 ;       ROT     ( w1 w2 w3 -- w2 w3 w1 ) ( TOS STM8: -- Y,Z,N )
 ;       Rot 3rd item to top.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  "ROT"
+        .endif
 ROT:
         .ifne   SPEEDOVERSIZE
         LDW     Y,X
@@ -1874,17 +1978,19 @@ ROT:
 
 ;       2DUP    ( w1 w2 -- w1 w2 w1 w2 )
 ;       Duplicate top two items.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     4
         .ascii  "2DUP"
+        .endif
 DDUP:
         CALLR    1$
 1$:
         JP      OVER
 
+        .ifeq   UNLINKCORE
 ;       DNEGATE ( d -- -d )     ( TOS STM8: -- Y,Z,N )
 ;       Two's complement of top double.
 
@@ -1907,15 +2013,19 @@ DNEGA:
         INCW    Y
 DN1:    LDW     (X),Y
         RET
+        .endif
 
+        .ifeq   BOOTSTRAP
 ;       =       ( w w -- t )    ( TOS STM8: -- Y,Z,N )
 ;       Return true if top two are equal.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     1
         .ascii  "="
+        .endif
 EQUAL:
         .ifne   SPEEDOVERSIZE
         LD      A,#0x0FF        ;true
@@ -1938,16 +2048,18 @@ EQ1:    LD      (X),A
         CALL    XORR
         JP      ZEQUAL                 ; 31 cy= (18+13)
         .endif
+        .endif
 
 
 ;       U<      ( u u -- t )    ( TOS STM8: -- Y,Z,N )
 ;       Unsigned compare of top two items.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "U<"
+        .endif
 ULESS:
         CLR     A
         CALLR   YTEMPCMP
@@ -1958,14 +2070,17 @@ ULESS:
         LDW     (X),Y
         RET
 
+        .ifeq   BOOTSTRAP
 ;       <       ( n1 n2 -- t )
 ;       Signed compare of top two items.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     1
         .ascii  "<"
+        .endif
 LESS:
         .ifne   SPEEDOVERSIZE
         CLR     A
@@ -1988,6 +2103,7 @@ LESS:
         CALL    SUBB             ; (29cy)
         JP      ZLESS            ; 41 cy (12+29)
         .endif
+        .endif
 
 ;       YTEMPCMP       ( n n -- n )      ( TOS STM8: -- Y,Z,N )
 ;       Load (TOS) to YTEMP and (TOS-1) to Y, DROP, CMP to STM8 flags
@@ -2002,14 +2118,17 @@ YTEMPCMP:
         CPW     Y,YTEMP
         RET
 
+        .ifeq   BOOTSTRAP
 ;       MAX     ( n n -- n )    ( TOS STM8: -- Y,Z,N )
 ;       Return greater of two top items.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  "MAX"
+        .endif
 MAX:
         CALLR   YTEMPCMP
         JRSGT   MMEXIT
@@ -2018,29 +2137,36 @@ YTEMPTOS:
         LDW     (X),Y
 MMEXIT:
         RET
+        .endif
 
+        .ifeq   BOOTSTRAP
 ;       MIN     ( n n -- n )    ( TOS STM8: -- Y,Z,N )
 ;       Return smaller of top two items.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  "MIN"
+        .endif
 MIN:
         CALLR   YTEMPCMP
         JRSLT   MMEXIT
         JRA     YTEMPTOS
+        .endif
 
 ;       WITHIN ( u ul uh -- t ) ( TOS STM8: -- Y,Z,N )
 ;       Return true if u is within
 ;       range of ul and uh. ( ul <= u < uh )
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     6
         .ascii  "WITHIN"
+        .endif
 WITHI:
         CALL    OVER
         CALL    SUBB
@@ -2054,12 +2180,13 @@ WITHI:
 ;       UM/MOD  ( udl udh un -- ur uq )
 ;       Unsigned divide of a double by a
 ;       single. Return mod and quotient.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     6
         .ascii  "UM/MOD"
+        .endif
 UMMOD:
         PUSHW   X       ; save stack pointer
         LDW     X,(X)   ; un
@@ -2100,6 +2227,7 @@ MMSM4:
         LDW     (2,X),Y
         RET
 
+        .ifeq   UNLINKCORE
 ;       M/MOD   ( d n -- r q )
 ;       Signed floored divide of double by
 ;       single. Return mod and quotient.
@@ -2110,25 +2238,23 @@ MMSM4:
         .db     5
         .ascii  "M/MOD"
 MSMOD:
-        CALL    DUPP
-        CALL    ZLESS
-        CALL    DUPP
-        CALL    TOR
-        CALL    QBRAN
-        .dw     MMOD1
+        LD      A,(X)           ; DUPP ZLESS
+        PUSH    A               ; DUPP TOR
+        JRPL    MMOD1           ; QBRAN
         CALL    NEGAT
         CALL    TOR
         CALL    DNEGA
         CALL    RFROM
-MMOD1:  CALL    TOR
-        JRPL    MMOD2
+MMOD1:
+        CALL    TOR
+        JRPL    MMOD2           ; DUPP ZLESS QBRAN
         CALL    RAT
         CALL    PLUS
 MMOD2:  CALL    RFROM
         CALLR   UMMOD
-        CALL    RFROM
-        CALL    QBRAN
-        .dw     MMOD3
+        POP     A               ; RFROM
+        TNZ     A
+        JRPL    MMOD3           ; QBRAN
         CALL    SWAPP
         CALL    NEGAT
         CALL    SWAPP
@@ -2171,17 +2297,19 @@ MODD:
 SLASH:
         CALLR   SLMOD
         JP      NIP
+        .endif
 
 ; Multiply
 
 ;       UM*     ( u u -- ud )
 ;       Unsigned multiply. Return double product.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  "UM*"
+        .endif
 UMSTA:                          ; stack have 4 bytes u1=a,b u2=c,d
         LD      A,(2,X)         ; b
         LD      YL,A
@@ -2227,43 +2355,42 @@ UMSTA:                          ; stack have 4 bytes u1=a,b u2=c,d
 
 ;       *       ( n n -- n )    ( TOS STM8: -- Y,Z,N )
 ;       Signed multiply. Return single product.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     1
         .ascii  "*"
+        .endif
 STAR:
         CALLR   UMSTA
         JP      DROP
 
+        .ifeq   UNLINKCORE
 ;       M*      ( n n -- d )
 ;       Signed multiply. Return double product.
-
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "M*"
 MSTAR:
-        CALL    DDUP
-        CALL    XORR
-        CALL    ZLESS
-        CALL    TOR
+        LD      A,(2,X)         ; DDUP
+        XOR     A,(X)           ; XORR
+        PUSH    A               ; TOR
         CALL    ABSS
         CALL    SWAPP
         CALL    ABSS
         CALLR   UMSTA
-        CALL    RFROM
-        CALL    QBRAN
-        .dw     MSTA1
+        POP     A               ; RFROM
+        TNZ     A
+        JRPL    MSTA1           ; QBRAN
         CALL    DNEGA
 MSTA1:  RET
 
 ;       */MOD   ( n1 n2 n3 -- r q )
 ;       Multiply n1 and n2, then divide
 ;       by n3. Return mod and quotient.
-
         .dw     LINK
 
         LINK =  .
@@ -2278,7 +2405,6 @@ SSMOD:
 ;       */      ( n1 n2 n3 -- q )    ( TOS STM8: -- Y,Z,N )
 ;       Multiply n1 by n2, then divide
 ;       by n3. Return quotient only.
-
         .dw     LINK
 
         LINK =  .
@@ -2287,6 +2413,7 @@ SSMOD:
 STASL:
         CALLR   SSMOD
         JP      NIP
+        .endif
 
 ; Miscellaneous
 
@@ -2306,14 +2433,17 @@ EXG:
         RET
         .endif
 
+        .ifeq   BOOTSTRAP
 ;       2/      ( n -- n )      ( TOS STM8: -- Y,Z,N )
-;       Multiply tos by 2.
+;       Divide tos by 2.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "2/"
+        .endif
 TWOSL:
         CALLR   DOXCODE
         SRAW    X
@@ -2322,24 +2452,28 @@ TWOSL:
 ;       2*      ( n -- n )      ( TOS STM8: -- Y,Z,N )
 ;       Multiply tos by 2.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "2*"
+        .endif
 CELLS:
         CALLR   DOXCODE
         SLAW    X
         RET
+        .endif
 
 ;       2-      ( a -- a )      ( TOS STM8: -- Y,Z,N )
 ;       Subtract 2 from tos.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "2-"
+        .endif
 CELLM:
         CALLR   DOXCODE
         DECW    X
@@ -2348,12 +2482,13 @@ CELLM:
 
 ;       2+      ( a -- a )      ( TOS STM8: -- Y,Z,N )
 ;       Add 2 to tos.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "2+"
+        .endif
 CELLP:
         CALLR   DOXCODE
         INCW    X
@@ -2362,12 +2497,13 @@ CELLP:
 
 ;       1-      ( n -- n )      ( TOS STM8: -- Y,Z,N )
 ;       Subtract 1 from tos.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "1-"
+        .endif
 ONEM:
         CALLR   DOXCODE
         DECW    X
@@ -2375,12 +2511,13 @@ ONEM:
 
 ;       1+      ( n -- n )      ( TOS STM8: -- Y,Z,N )
 ;       Add 1 to tos.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "1+"
+        .endif
 ONEP:
         CALLR   DOXCODE
         INCW    X
@@ -2402,12 +2539,13 @@ DOXCODE:
 
 ;       NOT     ( w -- w )     ( TOS STM8: -- Y,Z,N )
 ;       One's complement of TOS.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  "NOT"
+        .endif
 INVER:
         CALLR   DOXCODE
         CPLW    X
@@ -2415,12 +2553,13 @@ INVER:
 
 ;       NEGATE  ( n -- -n )     ( TOS STM8: -- Y,Z,N )
 ;       Two's complement of TOS.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     6
         .ascii  "NEGATE"
+        .endif
 NEGAT:
         CALLR   DOXCODE
         NEGW    X
@@ -2428,12 +2567,13 @@ NEGAT:
 
 ;       ABS     ( n -- n )      ( TOS STM8: -- Y,Z,N )
 ;       Return  absolute value of n.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  "ABS"
+        .endif
 ABSS:
         CALLR   DOXCODE
         JRPL    1$              ; positive?
@@ -2443,11 +2583,13 @@ ABSS:
         .ifne   WORDS_EXTRACORE
 ;       0=      ( n -- t )      ( TOS STM8: -- Y,Z,N ))
 ;       Return true if n is equal to 0
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (2)
         .ascii  "0="
+        .endif
         .endif
 ZEQUAL:
         CALLR   DOXCODE
@@ -2459,12 +2601,13 @@ ZEQUAL:
 
 ;       PICK    ( ... +n -- ... w )      ( TOS STM8: -- Y,Z,N )
 ;       Copy    nth stack item to tos.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     4
         .ascii  "PICK"
+        .endif
 PICK:
         CALLR   DOXCODE
         SLAW    X
@@ -2472,15 +2615,18 @@ PICK:
         LDW     X,(X)
         RET
 
+        .ifeq   BOOTSTRAP
  ;      >CHAR   ( c -- c )      ( TOS STM8: -- A,Z,N )
 ;       Filter non-printing characters.
 
         .ifne   WORDS_LINKMISC
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     5
         .ascii  ">CHAR"
+        .endif
         .endif
 TCHAR:
         LD      A,(1,X)
@@ -2492,11 +2638,11 @@ TCHAR:
 1$:     LD      A,#('_')
 2$:     LD      (1,X),A
         RET
+        .endif
 
 ;       DEPTH   ( -- n )      ( TOS STM8: -- Y,Z,N )
 ;       Return  depth of data stack.
-
-        .ifeq   BAREBONES
+        .ifeq   UNLINKCORE + BAREBONES
         .dw     LINK
 
         LINK =  .
@@ -2516,12 +2662,13 @@ DEPTH:
 
 ;       +!      ( n a -- )      ( TOS STM8: -- Y,Z,N )
 ;       Add n to contents at address a.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "+!"
+        .endif
 PSTOR:
         LDW     Y,X
         LDW     X,(X)
@@ -2540,7 +2687,7 @@ PSTOR:
 ;       Return count byte of a string
 ;       and add 1 to byte address.
 
-        .ifeq   BAREBONES
+        .ifeq   UNLINKCORE + BAREBONES
         .dw     LINK
 
         LINK =  .
@@ -2555,12 +2702,13 @@ COUNT:
 
 ;       HERE    ( -- a )      ( TOS STM8: -- A,Z,N )
 ;       Return  top of  code dictionary.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     4
         .ascii  "HERE"
+        .endif
 HERE:
 
         .ifne  HAS_CPNVM
@@ -2582,11 +2730,13 @@ HERECP:
 ;       above code dictionary.
 
         .ifne   WORDS_LINKCHAR
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  "PAD"
+        .endif
         .endif
 PAD:
         .ifne   HAS_BACKGROUND
@@ -2604,10 +2754,10 @@ PAD:
         DoLitC  PADOFFS
         JP      PLUS
 
+        .ifeq   BAREBONES
 ;       @EXECUTE        ( a -- )  ( TOS STM8: undefined )
 ;       Execute vector stored in address a.
 
-        .ifeq   BAREBONES
         .dw     LINK
 
         LINK =  .
@@ -2623,12 +2773,13 @@ ATEXE:
 
 ;       CMOVE   ( b1 b2 u -- )
 ;       Copy u bytes from b1 to b2.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     5
         .ascii  "CMOVE"
+        .endif
 CMOVE:
         CALL    TOR
         JRA     CMOV2
@@ -2646,12 +2797,13 @@ CMOV2:  CALL    DONXT
 ;       FILL    ( b u c -- )
 ;       Fill u bytes of character c
 ;       to area beginning at b.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     4
         .ascii  "FILL"
+        .endif
 FILL:
         CALL    SWAPP
         CALL    TOR
@@ -2667,12 +2819,13 @@ FILL2:  CALL    DONXT
         .ifeq   BAREBONES
 ;       ERASE   ( b u -- )
 ;       Erase u bytes beginning at b.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     5
         .ascii  "ERASE"
+        .endif
 ERASE:
         CALL    ZERO
         JRA     FILL
@@ -2683,11 +2836,13 @@ ERASE:
 ;       u characters from b. Null fill.
 
         .ifne   WORDS_LINKCHAR
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     5
         .ascii  "PACK$"
+        .endif
         .endif
 PACKS:
         CALL    DUPP
@@ -2706,11 +2861,13 @@ PACKS:
 ;       Convert digit u to a character.
 
         .ifne   WORDS_LINKCHAR
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     5
         .ascii  "DIGIT"
+        .endif
         .endif
 DIGIT:
         LD      A,(1,X)
@@ -2726,11 +2883,13 @@ DIGIT:
 ;       Extract least significant digit from n.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     7
         .ascii  "EXTRACT"
+        .endif
         .endif
 EXTRC:
         CALL    ZERO
@@ -2743,11 +2902,13 @@ EXTRC:
 ;       Initiate numeric output process.
 
         .ifne   WORDS_LINKCHAR
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "<#"
+        .endif
         .endif
 BDIGS:
         CALL    PAD
@@ -2758,11 +2919,13 @@ BDIGS:
 ;       Insert a character into output string.
 
         .ifne   WORDS_LINKCHAR
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     4
         .ascii  "HOLD"
+        .endif
         .endif
 HOLD:
         LD      A,(1,X)
@@ -2779,11 +2942,13 @@ HOLD:
 ;       append digit to output string.
 
         .ifne   WORDS_LINKCHAR
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     1
         .ascii  "#"
+        .endif
         .endif
 DIG:
         CALLR   BASEAT
@@ -2795,11 +2960,13 @@ DIG:
 ;       are added to output string.
 
         .ifne   WORDS_LINKCHAR
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "#S"
+        .endif
         .endif
 DIGS:
 DIGS1:  CALLR   DIG
@@ -2811,11 +2978,13 @@ DIGS1:  CALLR   DIG
 ;       numeric output string.
 
         .ifne   WORDS_LINKCHAR
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     4
         .ascii  "SIGN"
+        .endif
         .endif
 SIGN:
         TNZ     (X)
@@ -2829,11 +2998,13 @@ SIGN1:  JP      DROP
 ;       Prepare output string.
 
         .ifne   WORDS_LINKCHAR
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "#>"
+        .endif
         .endif
 EDIGS:
         LDW     Y,USRHLD
@@ -2847,11 +3018,13 @@ EDIGS:
 ;       to a numeric string.
 
         .ifne   WORDS_LINKCHAR
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  "str"
+        .endif
         .endif
 STR:
         CALL    DUPP
@@ -2866,12 +3039,13 @@ STR:
 ;       HEX     ( -- )
 ;       Use radix 16 as base for
 ;       numeric conversions.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  "HEX"
+        .endif
 HEX:
         LD      A,#16
         JRA     BASESET
@@ -2879,12 +3053,13 @@ HEX:
 ;       DECIMAL ( -- )
 ;       Use radix 10 as base
 ;       for numeric conversions.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     7
         .ascii  "DECIMAL"
+        .endif
 DECIM:
         LD      A,#10
 BASESET:
@@ -2905,11 +3080,13 @@ BASEAT:
 ;       integer. Push a flag on tos.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     7
         .ascii  "NUMBER?"
+        .endif
         .endif
 NUMBQ:
         PUSH    USRBASE+1
@@ -3004,11 +3181,13 @@ NUMDROP:
 ;       value. A flag indicates success.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     6
         .ascii  "DIGIT?"
+        .endif
         .endif
 DIGTQ:
         CALL    TOR
@@ -3034,12 +3213,13 @@ DGTQ1:  LD      (1,X),A
 ;       KEY     ( -- c )
 ;       Wait for and return an
 ;       input character.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  "KEY"
+        .endif
 KEY:
 KEY1:   CALL    [USRQKEY]
         CALL    QBRAN
@@ -3083,17 +3263,19 @@ NUFQ1:  RET
 ;       SPACE   ( -- )
 ;       Send    blank character to
 ;       output device.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     5
         .ascii  "SPACE"
+        .endif
 SPACE:
 
         CALL    BLANK
         JP      [USREMIT]
 
+        .ifeq   UNLINKCORE
 ;       SPACES  ( +n -- )
 ;       Send n spaces to output device.
 
@@ -3115,16 +3297,18 @@ CHAR1:  CALLR   SPACE
 CHAR2:  CALL    DONXT
         .dw     CHAR1
         RET
+        .endif
 
 ;       CR      ( -- )
 ;       Output a carriage return
 ;       and a line feed.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "CR"
+        .endif
 CR:
         .ifeq TERM_LINUX
         DoLitC  CRR
@@ -3139,11 +3323,13 @@ CR:
 ;       string.
 
         .ifne   WORDS_LINKRUNTI
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (COMPO+3)
         .ascii  "do$"
+        .endif
         .endif
 DOSTR:
         CALL    RFROM
@@ -3161,26 +3347,30 @@ DOSTR:
 ;       Return address of a compiled string.
 
         .ifne   WORDS_LINKRUNTI
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (COMPO+3)
         .ascii  '$"|'
         .endif
+
 STRQP:
-        CALL    DOSTR
-        RET
+        JRA     DOSTR
+        .endif
 
 ;       ."|     ( -- )
 ;       Run time routine of ." .
 ;       Output a compiled string.
 
         .ifne   WORDS_LINKRUNTI
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (COMPO+3)
         .ascii  '."|'
+        .endif
         .endif
 DOTQP:
         CALLR   DOSTR
@@ -3204,6 +3394,7 @@ DOTR:
         JRA     RFROMTYPES
         .endif
 
+        .ifeq   BAREBONES
 ;       U.R     ( u +n -- )
 ;       Display an unsigned integer
 ;       in n column, right justified.
@@ -3213,6 +3404,7 @@ DOTR:
         LINK =  .
         .db     3
         .ascii  "U.R"
+        .endif
 UDOTR:
         CALL    TOR
         CALLR   BDEDIGS
@@ -3225,12 +3417,13 @@ RFROMTYPES:
 
 ;       TYPE    ( b u -- )
 ;       Output u characters from b.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     4
         .ascii  "TYPE"
+        .endif
 TYPES:
         CALL    TOR
         JRA     TYPE2
@@ -3242,15 +3435,17 @@ TYPE2:
         .dw     TYPE1
         JP      DROP
 
+        .ifeq   BOOTSTRAP
 ;       U.      ( u -- )
 ;       Display an unsigned integer
 ;       in free format.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "U."
+        .endif
 UDOT:
         CALLR   BDEDIGS
         CALL    SPACE
@@ -3261,16 +3456,19 @@ BDEDIGS:
         CALL    BDIGS
         CALL    DIGS
         JP      EDIGS
+        .endif
 
+        .ifeq   BOOTSTRAP
 ;       .       ( w -- )
 ;       Display an integer in free
 ;       format, preceeded by a space.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     1
         .ascii  "."
+        .endif
 DOT:
         LD      A,USRBASE+1
         XOR     A,#10
@@ -3279,18 +3477,23 @@ DOT:
 1$:     CALL    STR
         CALL    SPACE
         JRA     TYPES
+        .endif
 
+        .ifeq   BOOTSTRAP
 ;       ?       ( a -- )
 ;       Display contents in memory cell.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     1
         .ascii  "?"
+        .endif
 QUEST:
         CALL    AT
         JRA     DOT
+        .endif
 
 
 ; Parsing
@@ -3321,11 +3524,13 @@ AFLAGS:
 ;       Return found string and its offset.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     4
         .ascii  "pars"
+        .endif
         .endif
 PARS:
         CALLR   AFLAGS          ; TEMP CSTOR
@@ -3395,11 +3600,13 @@ SUBPARS:
 ;       counted string delimited by c.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     5
         .ascii  "PARSE"
+        .endif
         .endif
 PARSE:
         DoLitW  TIBB
@@ -3413,42 +3620,51 @@ PARSE:
         CALL    INN
         JP      PSTOR
 
+        .ifeq   BOOTSTRAP
 ;       .(      ( -- )
 ;       Output following string up to next ) .
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+2)
         .ascii  ".("
+        .endif
 DOTPR:
         DoLitC  41      ; ")"
         CALLR   PARSE
         JP      TYPES
+        .endif
 
+        .ifeq   BOOTSTRAP
 ;       (       ( -- )
 ;       Ignore following string up to next ).
 ;       A comment.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+1)
         .ascii  "("
+        .endif
 PAREN:
         DoLitC  41      ; ")"
         CALLR   PARSE
         JP      DDROP
+        .endif
 
 ;       \       ( -- )
 ;       Ignore following text till
 ;       end of line.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+1)
         .ascii  "\"
+        .endif
 BKSLA:
         LDW     Y,USRNTIB
         LDW     USR_IN,Y
@@ -3459,11 +3675,13 @@ BKSLA:
 ;       and copy it to code dictionary.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     4
         .ascii  "WORD"
+        .endif
         .endif
 WORDD:
         CALLR   PARSE
@@ -3476,23 +3694,24 @@ WORDD:
 ;       and copy it to name dictionary.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     5
         .ascii  "TOKEN"
         .endif
+        .endif
 TOKEN:
         CALL    BLANK
         JRA     WORDD
 
 ; Dictionary search
-
 ;       NAME>   ( na -- ca )
 ;       Return a code address given
 ;       a name address.
 
-        .ifeq   BAREBONES
+        .ifeq   UNLINKCORE + BAREBONES
         .dw     LINK
 
         LINK =  .
@@ -3514,7 +3733,6 @@ NAMET:
         LDW     Y,(Y)           ; @
         LDW     (X),Y
 1$:     RET                     ; THEN
-
         .endif
 
 
@@ -3534,11 +3752,13 @@ SAMEQCAT:
 ;       strings. Return 0 if identical.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     5
         .ascii  "SAME?"
+        .endif
         .endif
 SAMEQ:
         CALL    ONEM
@@ -3561,11 +3781,13 @@ SAME2:  CALL    DONXT
 ;       convert char to upper case
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     4
         .ascii  "CUPPER"
+        .endif
         .endif
 CUPPER:
         LD      A,(1,X)
@@ -3582,11 +3804,13 @@ CUPPER:
 ;       Search vocabularies for a string.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     5
         .ascii  "NAME?"
+        .endif
         .endif
 NAMEQ:
         .ifne   HAS_ALIAS
@@ -3602,11 +3826,13 @@ NAMEQ:
 ;       Return ca and na if succeeded.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     4
         .ascii  "find"
+        .endif
         .endif
 FIND:
         CALLR   SWAPPF          ; SWAPP
@@ -3663,11 +3889,13 @@ SWAPPF:
 ;       Backup cursor by one character.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  "^h"
+        .endif
         .endif
 BKSP:
         CALL    TOR
@@ -3693,11 +3921,13 @@ BACK1:  RET
 ;       and bump cursor.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  "TAP"
+        .endif
         .endif
 TAP:
         .ifeq   HALF_DUPLEX
@@ -3713,11 +3943,13 @@ TAP:
 ;       CR or backspace.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     4
         .ascii  "kTAP"
+        .endif
         .endif
 KTAP:
         LD      A,(1,X)
@@ -3730,22 +3962,24 @@ KTAP:
         .dw     KTAP1
 
         CALL    BLANK
-        JP      TAP
-KTAP1:  JP      BKSP
+        JRA     TAP
+KTAP1:  JRA     BKSP
 KTAP2:  CALL    DROP
         CALL    NIP
         JP      DUPP
 
-;       accept  ( b u -- b u )
-;       Accept characters to input
+;       ACCEPT  ( b u -- b u )
+;       Accept one line of characters to input
 ;       buffer. Return with actual count.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     6
         .ascii  "ACCEPT"
+        .endif
         .endif
 ACCEP:
         CALL    OVER
@@ -3762,29 +3996,31 @@ ACCP1:  CALL    DDUP
         CALL    WITHI
         CALL    QBRAN
         .dw     ACCP2
-        CALL    TAP
+        CALLR   TAP
         JRA     ACCP3
-ACCP2:  CALL    KTAP
+ACCP2:  CALLR   KTAP
 ACCP3:  JRA     ACCP1
 ACCP4:  CALL    DROP
         CALL    OVER
         JP      SUBB
 
 ;       QUERY   ( -- )
-;       Accept input stream to
+;       Accept one line from input stream to
 ;       terminal input buffer.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     5
         .ascii  "QUERY"
         .endif
+        .endif
 QUERY:
         DoLitW  TIBB
         DoLitC  TIBLENGTH
-        CALL    ACCEP
+        CALLR   ACCEP
         CALL    NTIB
         CALL    STORE
         CLR     USR_IN
@@ -3796,11 +4032,13 @@ QUERY:
 ;       jump to QUIT.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     5
         .ascii  "ABORT"
+        .endif
         .endif
 ABORT:
         CALLR   PRESE
@@ -3811,11 +4049,13 @@ ABORT:
 ;       Abort with a message.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (COMPO+5)
         .ascii  "aborq"
+        .endif
         .endif
 ABORQ:
         CALL    QBRAN
@@ -3835,11 +4075,13 @@ ABOR2:  CALL    DOSTR
 ;       terminal input buffer.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     6
         .ascii  "PRESET"
+        .endif
         .endif
 PRESE:
         CLR     USRNTIB
@@ -3854,11 +4096,13 @@ PRESE:
 ;       try to convert it to an integer.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     10
         .ascii  "$INTERPRET"
+        .endif
         .endif
 INTER:
         CALL    NAMEQ
@@ -3867,7 +4111,7 @@ INTER:
         CALL    AT
         DoLitW  0x04000         ; COMPO*256
         CALL    ANDD            ; ?compile only lexicon bits
-        CALL    ABORQ
+        CALLR   ABORQ
         .db     13
         .ascii  " compile only"
         JP      EXECU
@@ -3878,7 +4122,6 @@ INTE1:  CALL    NUMBQ           ; convert a number
 
 ;       [       ( -- )
 ;       Start   text interpreter.
-
         .dw     LINK
 
         LINK =  .
@@ -3899,11 +4142,13 @@ COMPIQ:
 ;       Display 'ok' while interpreting.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  ".OK"
+        .endif
         .endif
 DOTOK:
         CALLR   COMPIQ
@@ -3921,11 +4166,13 @@ DOTO1:  JP      CR
 ;       Abort if stack underflows.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     6
         .ascii  "?STACK"
+        .endif
         .endif
 QSTAC:
         CALL    DEPTH
@@ -3939,11 +4186,13 @@ QSTAC:
 ;       Interpret input stream.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     4
         .ascii  "EVAL"
+        .endif
         .endif
 EVAL:
 EVAL1:  CALL    TOKEN
@@ -3962,11 +4211,13 @@ EVAL2:
 ;       and start text interpreter.
 
         .ifne   WORDS_LINKINTER
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     4
         .ascii  "QUIT"
+        .endif
         .endif
 QUIT:
         LDW     Y,#RPP          ; initialize return stack
@@ -3981,12 +4232,13 @@ QUIT2:  CALL    QUERY           ; get input
 ;       '       ( -- ca )
 ;       Search vocabularies for
 ;       next word in input stream.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     1
         .ascii  "'"
+        .endif
 TICK:
         CALL    TOKEN
         CALL    NAMEQ   ;?defined
@@ -3997,7 +4249,6 @@ TICK:
 ;       ,       ( w -- )
 ;       Compile an integer into
 ;       code dictionary.
-
         .dw     LINK
 
         LINK =  .
@@ -4010,7 +4261,6 @@ COMMA:
 
 ;       C,      ( c -- )
 ;       Compile a byte into code dictionary.
-
         .dw     LINK
 
         LINK =  .
@@ -4030,8 +4280,7 @@ OMMA:
 
 ;       CALL,   ( ca -- )
 ;       Compile a subroutine call.
-
-        .ifeq   BAREBONES
+        .ifeq   UNLINKCORE + BAREBONES
         .dw     LINK
 
         LINK =  .
@@ -4063,12 +4312,13 @@ JSRC:
 ;       LITERAL ( w -- )
 ;       Compile tos to dictionary
 ;       as an integer literal.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+7)
         .ascii  "LITERAL"
+        .endif
 LITER:
         .ifne  USE_CALLDOLIT
         CALLR   COMPI
@@ -4079,11 +4329,12 @@ LITER:
         .endif
         JRA      COMMA
 
+        .ifeq BOOTSTRAP
 ;       [COMPILE]       ( -- ; <string> )
 ;       Compile next immediate
 ;       word into code dictionary.
 
-        .ifeq   BAREBONES
+        .ifeq   UNLINKCORE + BAREBONES
         .dw     LINK
 
         LINK =  .
@@ -4093,12 +4344,12 @@ LITER:
 BCOMP:
         CALLR   TICK
         JRA     JSRC
+        .endif
 
 ;       COMPILE ( -- )
 ;       Compile next jsr in
 ;       colon list to code dictionary.
-
-        .ifeq   BAREBONES
+        .ifeq   UNLINKCORE + BAREBONES
         .dw     LINK
 
         LINK =  .
@@ -4106,24 +4357,44 @@ BCOMP:
         .ascii  "COMPILE"
         .endif
 COMPI:
-        CALL    RFROM
-        CALL    ONEP
-        CALL    DUPP
-        CALL    AT
-        CALLR   JSRC            ; compile subroutine
-        CALL    CELLP
-        CALL    TOR             ; this was a JP - a serious bug that took a while to find
-        RET
+        EXGW    X,Y
+        POPW    X
+        LD      A,(X)
+        INCW    X
+        CP      A,#CALL_OPC
+        JRNE    COMPIO1
+        LDW     YTEMP,X         ; COMPILE CALL address
+        INCW    X
+        INCW    X
+        PUSHW   X
+        LDW     X,[YTEMP]
+        JRA     COMPIO2
+COMPIO1:
+        LD      A,(X)           ; COMPILE CALLR offset
+        INCW    X
+        PUSHW   X               ; return address
+        CLRW    X               ; offset i8_t to i16_t
+        TNZ     A
+        JRPL    1$
+        DECW    X
+1$:     LD      XL,A
+        ADDW    X,(1,SP)        ; add offset in X to address of next instruction
+COMPIO2:
+        EXGW    X,Y
+        CALL    YSTOR
+        JRA     JSRC            ; compile subroutine
+
 
 ;       $,"     ( -- )
 ;       Compile a literal string
 ;       up to next " .
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  '$,"'
+        .endif
 STRCQ:
         DoLitC  34              ; "
         CALL    PARSE
@@ -4137,15 +4408,17 @@ CNTPCPPSTORE:
 
 ; Structures
 
+        .ifeq   BOOTSTRAP
 ;       FOR     ( -- a )
 ;       Start a FOR-NEXT loop
 ;       structure in a colon definition.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+3)
         .ascii  "FOR"
+        .endif
 FOR:
         CALLR   COMPI
         CALL    TOR
@@ -4154,26 +4427,32 @@ FOR:
 ;       NEXT    ( a -- )
 ;       Terminate a FOR-NEXT loop.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+4)
         .ascii  "NEXT"
+        .endif
 NEXT:
         CALLR   COMPI
         CALL    DONXT
         JP      COMMA
+        .endif
 
         .ifne   HAS_DOLOOP
+        .ifeq   BOOTSTRAP
 ;       DO      ( -- a )
 ;       Start a DO LOOP loop
 ;       structure in a colon definition.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+2)
         .ascii  "DO"
+        .endif
 DOO:
         CALL    CCOMMALIT
         .db     DOLIT_OPC       ; LOOP address cell for usage by LEAVE at runtime
@@ -4189,11 +4468,13 @@ DOO:
 ;       LOOP    ( a -- )
 ;       Terminate a DO-LOOP loop.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+4)
         .ascii  "LOOP"
+        .endif
 LOOP:
         CALL    COMPI
         CALL    ONE
@@ -4202,11 +4483,13 @@ LOOP:
 ;       +LOOP   ( a +n -- )
 ;       Terminate a DO - +LOOP loop.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+5)
         .ascii  "+LOOP"
+        .endif
 PLOOP:
         CALL    COMPI
         CALL    DOPLOOP
@@ -4217,16 +4500,20 @@ PLOOP:
         CALL    STORE           ; patch DO runtime code for LEAVE
         JP      COMMA
         .endif
+        .endif
 
+        .ifeq   BOOTSTRAP
 ;       BEGIN   ( -- a )
 ;       Start an infinite or
 ;       indefinite loop structure.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+5)
         .ascii  "BEGIN"
+        .endif
 BEGIN:
         JP      HERE
 
@@ -4234,11 +4521,13 @@ BEGIN:
 ;       Terminate a BEGIN-UNTIL
 ;       indefinite loop structure.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+5)
         .ascii  "UNTIL"
+        .endif
 UNTIL:
         CALL    COMPI
         CALL    QBRAN
@@ -4248,11 +4537,13 @@ UNTIL:
 ;       Terminate a BEGIN-AGAIN
 ;       infinite loop structure.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+5)
         .ascii  "AGAIN"
+        .endif
 AGAIN:
         CALL    CCOMMALIT
         .db     BRAN_OPC
@@ -4261,11 +4552,13 @@ AGAIN:
 ;       IF      ( -- A )
 ;       Begin a conditional branch.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+2)
         .ascii  "IF"
+        .endif
 IFF:
         CALL    COMPI
         CALL    QBRAN
@@ -4274,11 +4567,13 @@ IFF:
 ;       THEN    ( A -- )
 ;       Terminate a conditional branch structure.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+4)
         .ascii  "THEN"
+        .endif
 THENN:
         CALL    HERE
         CALLR   SWAPLOC
@@ -4287,11 +4582,13 @@ THENN:
 ;       ELSE    ( A -- A )
 ;       Start the false clause in an IF-ELSE-THEN structure.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+4)
         .ascii  "ELSE"
+        .endif
 ELSEE:
         CALLR   AHEAD
         CALLR   SWAPLOC
@@ -4300,7 +4597,7 @@ ELSEE:
 ;       AHEAD   ( -- A )
 ;       Compile a forward branch instruction.
 
-        .ifeq   BAREBONES
+        .ifeq   UNLINKCORE + BAREBONES
         .dw     LINK
 
         LINK =  .
@@ -4312,31 +4609,37 @@ AHEAD:
         .db     BRAN_OPC
 HERE0COMMA:
         CALL    HERE
+        .endif
 ZEROCOMMA:
         CALL    ZERO
         JP      COMMA
 
+        .ifeq   BOOTSTRAP
 ;       WHILE   ( a -- A a )
 ;       Conditional branch out of a BEGIN-WHILE-REPEAT loop.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+5)
         .ascii  "WHILE"
+        .endif
 WHILE:
-        CALL    IFF
+        CALLR   IFF
 SWAPLOC:
         JP      SWAPP
 
 ;       REPEAT  ( A a -- )
 ;       Terminate a BEGIN-WHILE-REPEAT indefinite loop.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+6)
         .ascii  "REPEAT"
+        .endif
 REPEA:
         CALLR   AGAIN
         JRA     THENN
@@ -4344,59 +4647,71 @@ REPEA:
 ;       AFT     ( a -- a A )
 ;       Jump to THEN in a FOR-AFT-THEN-NEXT loop the first time through.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+3)
         .ascii  "AFT"
+        .endif
 AFT:
         CALL    DROP
         CALLR   AHEAD
         CALL    HERE
         JRA     SWAPLOC
+        .endif
 
+        .ifeq   BOOTSTRAP
 ;       ABORT"  ( -- ; <string> )
 ;       Conditional abort with an error message.
 
+        .ifeq   UNLINKCORE + BAREBONES
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+6)
-        .ascii  "ABORT"
-        .db     '"
+        .ascii  'ABORT"'
+        .endif
 ABRTQ:
         CALL    COMPI
         CALL    ABORQ
         JRA     STRCQLOC
+        .endif
 
 ;       $"      ( -- ; <string> )
 ;       Compile an inline string literal.
 
         .ifne   WORDS_LINKCHAR
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+2)
         .ascii  '$"'
         .endif
+        .endif
 STRQ:
         CALL    COMPI
-        CALL    STRQP
+        CALL    DOSTR
 STRCQLOC:
         JP      STRCQ
 
+        .ifeq   BOOTSTRAP
 ;       ."      ( -- ; <string> )
 ;       Compile an inline string literal to be typed out at run time.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+2)
         .ascii  '."'
+        .endif
 DOTQ:
         CALL    COMPI
         CALL    DOTQP
         JRA     STRCQLOC
+        .endif
 
 ; Name compiler
 
@@ -4405,11 +4720,13 @@ DOTQ:
 ;       if word already exists.
 
         .ifne   WORDS_LINKCOMP
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     7
         .ascii  "?UNIQUE"
+        .endif
         .endif
 UNIQU:
         CALL    DUPP
@@ -4428,17 +4745,19 @@ UNIQ1:  JP      DROP
 ;       using string at na.
 
         .ifne   WORDS_LINKCOMP
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  "$,n"
         .endif
+        .endif
 SNAME:
         CALL    DUPPCAT         ; ?null input
         CALL    QBRAN
         .dw     PNAM1
-        CALL    UNIQU           ; ?redefinition
+        CALLR   UNIQU           ; ?redefinition
         CALL    DUPP
         CALL    CNTPCPPSTORE
         CALL    DUPP
@@ -4449,7 +4768,7 @@ SNAME:
         CALL    AT
         CALL    SWAPP
         JP      STORE           ; save code pointer
-PNAM1:  CALL    STRQP
+PNAM1:  CALL    DOSTR
         .db     5
         .ascii  " name"         ; null input
         JP      ABOR1
@@ -4461,11 +4780,13 @@ PNAM1:  CALL    STRQP
 ;       dictionary as a token or literal.
 
         .ifne   WORDS_LINKCOMP
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     8
         .ascii  "$COMPILE"
+        .endif
         .endif
 SCOMP:
         CALL    NAMEQ
@@ -4489,11 +4810,13 @@ SCOM2:  CALL    NUMBQ   ;try to convert to number
 ;       Link a new word into vocabulary.
 
         .ifne   WORDS_LINKCOMP + HAS_ALIAS
+        .ifeq          UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     5
         .ascii  "OVERT"
+        .endif
         .endif
 OVERT:
         .ifne   HAS_CPNVM
@@ -4529,7 +4852,6 @@ OVSTORE:
 
 ;       ;       ( -- )
 ;       Terminate a colon definition.
-
         .dw     LINK
 
         LINK =  .
@@ -4541,11 +4863,9 @@ SEMIS:
         CALL    LBRAC
         JRA     OVERT
 
-
 ;       :       ( -- ; <string> )
 ;       Start a new colon definition
 ;       using next word as its name.
-
         .dw     LINK
 
         LINK =  .
@@ -4560,12 +4880,13 @@ COLON:
 ;       IMMEDIATE       ( -- )
 ;       Make last compiled word
 ;       an immediate word.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     9
         .ascii  "IMMEDIATE"
+        .endif
 IMMED:
         LD      A,[USRLAST]
         OR      A,#IMEDD
@@ -4575,7 +4896,6 @@ IMMED:
 ;       ]       ( -- )
 ;       Start compiling words in
 ;       input stream.
-
         .dw     LINK
 
         LINK =  .
@@ -4593,15 +4913,16 @@ RBRAC:
 
 ;       DOES>   ( -- )
 ;       Define action of defining words
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (IMEDD+5)
         .ascii  "DOES>"
+        .endif
 DOESS:
         CALL    COMPI
-        CALL    DODOES          ; 3 CALL dodoes>
+        CALLR   DODOES          ; 3 CALL dodoes>
         CALL    HERECP
         .ifne  USE_CALLDOLIT
         DoLitC  9
@@ -4620,11 +4941,13 @@ DOESS:
 ;       link action to words created by defining words
 
         .ifne   WORDS_LINKRUNTI
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     6
         .ascii  "dodoes"
+        .endif
         .endif
 DODOES:
         CALL    LAST                   ; ( link field of current word )
@@ -4656,12 +4979,13 @@ DODOES:
 ;       CREATE  ( -- ; <string> )
 ;       Compile a new array
 ;       without allocating space.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     6
         .ascii  "CREATE"
+        .endif
 CREAT:
         .ifne   HAS_CPNVM
         LDW     Y,USREVAL
@@ -4687,12 +5011,13 @@ CREAT:
 ;       VARIABLE        ( -- ; <string> )
 ;       Compile a new variable
 ;       initialized to 0.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     8
         .ascii  "VARIABLE"
+        .endif
 VARIA:
         CALLR   CREAT
         CALL    ZERO
@@ -4714,12 +5039,13 @@ VARIA:
 
 ;       ALLOT   ( n -- )
 ;       Allocate n bytes to code DICTIONARY.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     5
         .ascii  "ALLOT"
+        .endif
 ALLOT:
         CALL    CPP
         .ifne   HAS_CPNVM
@@ -4733,6 +5059,8 @@ ALLOT:
 
 ; Tools
 
+        .ifeq   BOOTSTRAP
+        .ifeq   UNLINKCORE
 ;       _TYPE   ( b u -- )
 ;       Display a string. Filter
 ;       non-printing characters.
@@ -4744,6 +5072,7 @@ ALLOT:
         .db     5
         .ascii  "_TYPE"
         .endif
+        .endif
 UTYPE:
         CALL    TOR     ;start count down loop
         JRA     UTYP2   ;skip first pass
@@ -4754,17 +5083,21 @@ UTYP1:  CALL    DUPPCAT
 UTYP2:  CALL    DONXT
         .dw     UTYP1   ;loop till done
         JP      DROP
+        .endif
 
+        .ifeq   BOOTSTRAP
 ;       dm+     ( a u -- a )
 ;       Dump u bytes from ,
 ;       leaving a+u on  stack.
 
+        .ifeq   UNLINKCORE
         .ifne   WORDS_LINKMISC
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  "dm+"
+        .endif
         .endif
 DUMPP:
         CALL    OVER
@@ -4780,16 +5113,19 @@ PDUM1:  CALL    DUPPCAT
 PDUM2:  CALL    DONXT
         .dw     PDUM1   ;loop till done
         RET
+        .endif
 
+        .ifeq   BOOTSTRAP
 ;       DUMP    ( a u -- )
 ;       Dump u bytes from a,
 ;       in a formatted manner.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     4
         .ascii  "DUMP"
+        .endif
 DUMP:
         PUSH    USRBASE+1       ; BASE AT TOR save radix
         CALL    HEX
@@ -4810,15 +5146,18 @@ DUMP1:  CALL    CR
 DUMP3:
         POP     USRBASE+1       ; restore radix
         JP      DROP
+        .endif
 
+        .ifeq   BOOTSTRAP
 ;       .S      ( ... -- ... )
 ;       Display contents of stack.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     2
         .ascii  ".S"
+        .endif
 DOTS:
         CALL    CR
         CALL    DEPTH           ; stack depth
@@ -4834,16 +5173,20 @@ DOTS2:  CALL    DONXT
         .db     5
         .ascii  " <sp "
         RET
+        .endif
 
+        .ifeq   BOOTSTRAP
 ;       .ID     ( na -- )
 ;       Display name at address.
 
+        .ifeq   UNLINKCORE
         .ifne   WORDS_LINKMISC
         .dw     LINK
 
         LINK =  .
         .db     3
         .ascii  ".ID"
+        .endif
         .endif
 DOTID:
         CALL    QDQBRAN         ; if zero no name
@@ -4856,10 +5199,12 @@ DOTI1:  CALL    DOTQP
         .db     9
         .ascii  " (noName)"
         RET
+        .endif
 
 DUPPCAT:
         CALL    DUPP
         JP      CAT
+
 
 
         .ifne   WORDS_EXTRADEBUG
@@ -4890,50 +5235,19 @@ TNAM2:  CALL    AT
 TNAM3:  JP      NIP
 TNAM4:  CALL    DDROP
         JP      ZERO
-
-;       SEE     ( -- ; <string> )
-;       A simple decompiler.
-;       Updated for byte machines.
-
-        .dw     LINK
-
-        LINK =  .
-        .db     3
-        .ascii  "SEE"
-SEE:
-        CALL    TICK    ;starting address
-        CALL    CR
-        CALL    ONEM
-SEE1:
-        CALL    CELLP   ;Fixed tg9541
-        CALL    DUPP
-        CALL    AT
-        CALL    DUPP    ;?does it contain a zero
-        CALL    QBRAN
-        .dw     SEE2
-        CALL    TNAME   ;?is it a name
-SEE2:   CALL    QDQBRAN ;name address or zero
-        .dw     SEE3
-        CALL    SPACE
-        CALL    DOTID   ;display name
-        CALL    ONEP
-        JRA     SEE4
-SEE3:   CALLR   DUPPCAT
-        CALL    UDOT    ;display number
-SEE4:   CALL    NUFQ    ;user control
-        CALL    QBRAN
-        .dw     SEE1
-        JP      DROP
         .endif
 
+        .ifeq          UNLINKCORE
 ;       WORDS   ( -- )
 ;       Display names in vocabulary.
 
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     5
         .ascii  "WORDS"
+        .endif
 WORDS:
         CALL    CR
         CALL    CNTXT           ; only in context
@@ -4945,6 +5259,8 @@ WORS1:  CALL    AT              ; @ sets Z and N
         CALL    CELLM
         JRA     WORS1
 1$:     JP      DROP
+              .endif
+
 
 
 
@@ -4969,11 +5285,13 @@ PAT7SAZ:
 
 ;       E7S  ( c -- )
 ;       Convert char to 7-seg LED pattern, and insert it in display buffer
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (3)
         .ascii  "E7S"
+        .endif
 EMIT7S:
         LD      A,(1,X)         ; c to A
 
@@ -5074,11 +5392,13 @@ XLEDGROUP:
 
 ;       P7S  ( c -- )
 ;       Right aligned 7S-LED pattern output, rotates LED group buffer
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (3)
         .ascii  "P7S"
+        .endif
 PUT7S:
         .if     gt,(HAS_LED7SEG-1)
         CALLR   XLEDGROUP
@@ -5113,10 +5433,12 @@ PUT7S:
 
 ;       ?KEYB   ( -- c T | F )  ( TOS STM8: -- Y,Z,N )
 ;       Return keyboard char and true, or false if no key pressed.
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     5
         .ascii  "?KEYB"
+        .endif
 QKEYB:
         CALL    BKEYCHAR        ; Read char from keyboard (option: vectored code)
         CALL    AFLAGS
@@ -5145,11 +5467,13 @@ NOKEYB:
         .ifne   HAS_ADC
 ;       ADC!  ( c -- )
 ;       Init ADC, select channel for conversion
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (4)
         .ascii  "ADC!"
+        .endif
 
 ADCSTOR:
         INCW    X
@@ -5163,11 +5487,13 @@ ADCSTOR:
 
 ;       ADC@  ( -- w )
 ;       start ADC conversion, read result
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (4)
         .ascii  "ADC@"
+        .endif
 
 ADCAT:
         BRES    ADC_CSR,#7      ; reset EOC
@@ -5185,44 +5511,48 @@ ADCAT:
 
 ;       SP!     ( a -- )
 ;       Set data stack pointer.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     3
         .ascii  "sp!"
+        .endif
 SPSTO:
         LDW     X,(X)   ;X = a
         RET
 
 ;       SP@     ( -- a )        ( TOS STM8: -- Y,Z,N )
 ;       Push current stack pointer.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     3
         .ascii  "sp@"
+        .endif
 SPAT:
         LDW     Y,X
         JP      YSTOR
 
 ;       RP@     ( -- a )     ( TOS STM8: -- Y,Z,N )
 ;       Push current RP to data stack.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     3
         .ascii  "rp@"
+        .endif
 RPAT:
         LDW     Y,SP            ; save return addr
         JP      YSTOR
 
 ;       RP!     ( a -- )
 ;       Set return stack pointer.
-
+        .ifeq   UNLINKCORE
         .dw     LINK
         LINK =  .
         .db     (COMPO+3)
         .ascii  "rp!"
+        .endif
 RPSTO:
         POPW    Y
         LDW     YTEMP,Y
@@ -5240,11 +5570,13 @@ RPSTO:
         .ifne   WORDS_EXTRAEEPR
 ;       ULOCK  ( -- )
 ;       Unlock EEPROM (STM8S)
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (5)
         .ascii  "ULOCK"
+        .endif
 ULOCK:
         MOV     FLASH_DUKR,#0xAE
         MOV     FLASH_DUKR,#0x56
@@ -5254,11 +5586,13 @@ ULOCK:
 
 ;       LOCK  ( -- )
 ;       Lock EEPROM (STM8S)
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (4)
         .ascii  "LOCK"
+        .endif
 LOCK:
         BRES    FLASH_IAPSR,#3
         RET
@@ -5269,11 +5603,13 @@ LOCK:
 ;       ULOCKF  ( -- )
 ;       Unlock Flash (STM8S)
         .ifne   WORDS_EXTRAEEPR
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (6)
         .ascii  "ULOCKF"
+        .endif
         .endif
 UNLOCK_FLASH:
         MOV     FLASH_PUKR,#0x56
@@ -5285,11 +5621,13 @@ UNLOCK_FLASH:
 ;       LOCKF  ( -- )
 ;       Lock Flash (STM8S)
         .ifne   WORDS_EXTRAEEPR
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (5)
         .ascii  "LOCKF"
+        .endif
         .endif
 LOCK_FLASH:
         BRES    FLASH_IAPSR,#1
@@ -5316,11 +5654,13 @@ SWAPCP:
 
 ;       NVM  ( -- )
 ;       Compile to NVM (enter mode NVM)
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (3)
         .ascii  "NVM"
+        .endif
 NVMM:
         CALLR    NVMQ
         JRNE    1$           ; state entry action?
@@ -5328,18 +5668,20 @@ NVMM:
         MOV     USRLAST,NVMCONTEXT
         MOV     USRLAST+1,NVMCONTEXT+1
         CALLR   SWAPCP
-        CALL    UNLOCK_FLASH
+        CALLR   UNLOCK_FLASH
 1$:
         RET
 
 
 ;       RAM  ( -- )
 ;       Compile to RAM (enter mode RAM)
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (3)
         .ascii  "RAM"
+        .endif
 RAMM:
         CALLR   NVMQ
         JREQ    1$
@@ -5361,11 +5703,13 @@ RAMM:
 
 ;       RESET  ( -- )
 ;       Reset Flash dictionary and 'BOOT to defaults and restart
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (5)
         .ascii  "RESET"
+        .endif
 RESETT:
         CALLR   UNLOCK_FLASH
         DoLitW  UDEFAULTS
@@ -5379,11 +5723,13 @@ RESETT:
 ;       SAVEC ( -- )
 ;       Minimal context switch for low level interrupt code
 ;       This should be the first word called in the interrupt handler
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (5)
         .ascii  "SAVEC"
+        .endif
 SAVEC:
         LDW     X,YTEMP         ; Save context
         PUSHW   X
@@ -5394,11 +5740,13 @@ SAVEC:
 ;       IRET ( -- )
 ;       Restore context and return from low level interrupt code
 ;       This should be the last word called in the interrupt handler
+        .ifeq   UNLINKCORE
         .dw     LINK
 
         LINK =  .
         .db     (4)
         .ascii  "IRET"
+        .endif
 RESTC:
         POPW    X
         LDW     YTEMP,X         ; restore context
